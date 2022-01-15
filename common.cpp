@@ -6,7 +6,6 @@
 #include <vector>
 #include <unordered_set>
 #include <memory>
-#include <stack>
 #include <regex>
 #include <optional>
 
@@ -38,7 +37,7 @@ private:
         //TODO remove from incoming cells
 
         for (Cell* out_cell: out_cells_) {
-            out_cell->RemoveFromIncoming(this);
+            out_cell->RemoveInCell(this);
         }
 
         out_cells_.clear();
@@ -73,12 +72,12 @@ public:
 
     ~Cell() override = default;
 
-    void SetFormula(std::string text, std::unique_ptr<IFormula> formula, std::unordered_set<Cell*> out_cells) {
+    void SetFormula(std::unique_ptr<IFormula> formula, std::unordered_set<Cell*> out_cells) {
 
         ClearData();
 
-        text_ = std::move(text);
         formula_ = std::move(formula);
+        text_ = '=' + formula_->GetExpression();
         out_cells_ = std::move(out_cells);
 
         for (Cell* out_cell: out_cells_) {
@@ -120,8 +119,54 @@ public:
         in_cells_.insert(cell);
     }
 
-    void RemoveFromIncoming(Cell* cell) {
+    void RemoveInCell(Cell* cell) {
         in_cells_.erase(cell);
+    }
+
+    void RemoveOutCell(Cell* cell) {
+        out_cells_.erase(cell);
+    }
+
+    bool HandleDeletedRows(int first, int count) {
+
+        if (formula_ == nullptr) return false;
+
+        IFormula::HandlingResult result = formula_->HandleDeletedRows(first, count);
+
+        switch (result) {
+
+            case IFormula::HandlingResult::NothingChanged:
+                return false;
+
+            case IFormula::HandlingResult::ReferencesRenamedOnly:
+                text_ = '=' + formula_->GetExpression();
+                return false;
+
+            case IFormula::HandlingResult::ReferencesChanged:
+                text_ = '=' + formula_->GetExpression();
+                return true;
+        }
+    }
+
+    bool HandleDeletedCols(int first, int count) {
+
+        if (formula_ == nullptr) return false;
+
+        IFormula::HandlingResult result = formula_->HandleDeletedCols(first, count);
+
+        switch (result) {
+
+            case IFormula::HandlingResult::NothingChanged:
+                return false;
+
+            case IFormula::HandlingResult::ReferencesRenamedOnly:
+                text_ = '=' + formula_->GetExpression();
+                return false;
+
+            case IFormula::HandlingResult::ReferencesChanged:
+                text_ = '=' + formula_->GetExpression();
+                return true;
+        }
     }
 
     const std::unordered_set<Cell*>& GetInCells() const {
@@ -178,6 +223,57 @@ private:
         ResizeCols(pos.col);
     }
 
+    void DeleteCell(Position pos) {
+
+        if (!pos.IsValid()) throw InvalidPositionException("invalid position for delete: " + pos.ToString());
+
+        if (OutOfRange(pos)) return;
+
+        std::unique_ptr<Cell>& cell_ptr = cells_[pos.row][pos.col];
+
+        if (cell_ptr == nullptr) return;
+
+        for (Cell* in_cell: cell_ptr->GetInCells()) {
+            in_cell->RemoveOutCell(cell_ptr.get());
+        }
+
+        for (Cell* out_cell: cell_ptr->GetOutCells()) {
+            out_cell->RemoveInCell(cell_ptr.get());
+        }
+
+        cell_ptr.reset();
+    }
+
+    void HandleDeletedRowsForCell(Position pos, int first, int count) {
+
+        if (!pos.IsValid()) throw InvalidPositionException("invalid position: " + pos.ToString());
+
+        if (OutOfRange(pos)) return;
+
+        std::unique_ptr<Cell>& cell_ptr = cells_[pos.row][pos.col];
+
+        if (cell_ptr == nullptr) return;
+
+        bool need_invalidate_cache = cell_ptr->HandleDeletedRows(first, count);
+
+        if (need_invalidate_cache) InvalidateCache(*cell_ptr);
+    }
+
+    void HandleDeletedColsForCell(Position pos, int first, int count) {
+
+        if (!pos.IsValid()) throw InvalidPositionException("invalid position: " + pos.ToString());
+
+        if (OutOfRange(pos)) return;
+
+        std::unique_ptr<Cell>& cell_ptr = cells_[pos.row][pos.col];
+
+        if (cell_ptr == nullptr) return;
+
+        bool need_invalidate_cache = cell_ptr->HandleDeletedCols(first, count);
+
+        if (need_invalidate_cache) InvalidateCache(*cell_ptr);
+    }
+
     static std::unordered_set<const Cell*> TransitiveReferencedCells(const std::unordered_set<Cell*>& formula_ref_cells) {
 
         std::stack<const Cell*> stack;
@@ -206,7 +302,7 @@ private:
         return result;
     }
 
-    void InvalidateCache(Cell& cell) {
+    static void InvalidateCache(Cell& cell) {
 
         std::unordered_set<Cell*> visited;
 
@@ -261,7 +357,7 @@ public:
 
             InvalidateCache(cell);
 
-            cell.SetFormula(std::move(text), std::move(formula), out_cells);
+            cell.SetFormula(std::move(formula), out_cells);
         } else {
             InvalidateCache(cell);
             cell.SetPlainText(std::move(text));
@@ -320,10 +416,46 @@ public:
 
     void DeleteRows(int first, int count) override {
 
+        if (Rows() <= first || count <= 0) return;
+
+        int last = std::min(static_cast<int>(Rows()), first + count);
+
+        for (int i = first; i < last; ++i) {
+            for (int j = 0; j < Cols(); ++j) {
+                DeleteCell(Position {i, j});
+            }
+        }
+
+        for (int i = last; i < Rows(); ++i) {
+            for (int j = 0; j < Cols(); ++j) {
+                HandleDeletedRowsForCell(Position {i, j}, first, count);
+            }
+        }
+
+        cells_.erase(cells_.begin() + first, cells_.begin() + last);
     }
 
     void DeleteCols(int first, int count) override {
 
+        if (Cols() <= first || count <= 0) return;
+
+        int last = std::min(static_cast<int>(Cols()), first + count);
+
+        for (int i = 0; i < Rows(); ++i) {
+            for (int j = first; j < last; ++j) {
+                DeleteCell(Position {i, j});
+            }
+        }
+
+        for (int i = 0; i < Rows(); ++i) {
+            for (int j = last; j < Cols(); ++j) {
+                HandleDeletedColsForCell(Position {i, j}, first, count);
+            }
+        }
+
+        for (int i = 0; i < Rows(); ++i) {
+            cells_[i].erase(cells_[i].begin() + first, cells_[i].begin() + last);
+        }
     }
 
     Size GetPrintableSize() const override {
