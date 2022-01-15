@@ -2,6 +2,9 @@
 
 #include "formula.h"
 
+#include <stack>
+#include <vector>
+#include <unordered_set>
 #include <memory>
 #include <stack>
 #include <regex>
@@ -21,66 +24,112 @@ private:
     const ISheet& sheet_;
     std::string text_;
     std::unique_ptr<IFormula> formula_;
-    mutable std::optional<Value> value_;
+    mutable std::optional<Value> cache_;
 
-    void UpdateValue() const {
+    std::unordered_set<Cell*> in_cells_;
+    std::unordered_set<Cell*> out_cells_;
+
+    void ClearData() {
+
+        text_.clear();
+        formula_.reset();
+        cache_.reset();
+
+        //TODO remove from incoming cells
+
+        for (Cell* out_cell: out_cells_) {
+            out_cell->RemoveFromIncoming(this);
+        }
+
+        out_cells_.clear();
+    }
+
+    void CalculateCache() const {
         if (formula_) {
 
             const auto& result = formula_->Evaluate(sheet_);
 
             if (std::holds_alternative<double>(result)) {
-                value_.emplace(std::get<double>(result));
+                cache_.emplace(std::get<double>(result));
             } else {
-                value_.emplace(std::get<FormulaError>(result));
+                cache_.emplace(std::get<FormulaError>(result));
             }
-        } else if (!text_.empty() && text_.front() == '\'') {
-            value_.emplace(text_.substr(1));
+        } else if (!text_.empty() && text_.front() == kEscapeSign) {
+            cache_.emplace(text_.substr(1));
         } else {
-            value_.emplace(text_);
+            cache_.emplace(text_);
         }
     }
 
 public:
 
-    Cell(const ISheet& sheet, std::string text): sheet_(sheet), text_(std::move(text)), value_(std::nullopt) {
-        if (!text_.empty() && text_.front() == '=') {
-            formula_ = ParseFormula(text_.substr(1));
-        }
-    }
+    explicit Cell(const ISheet& sheet)
+        : sheet_(sheet),
+          text_(),
+          formula_(),
+          cache_(std::nullopt),
+          in_cells_(),
+          out_cells_() {}
 
     ~Cell() override = default;
 
+    void SetFormula(std::string text, std::unique_ptr<IFormula> formula, std::unordered_set<Cell*> out_cells) {
+
+        ClearData();
+
+        text_ = std::move(text);
+        formula_ = std::move(formula);
+        out_cells_ = std::move(out_cells);
+
+        for (Cell* out_cell: out_cells_) {
+            out_cell->AddIncomingCell(this);
+        }
+    }
+
+    void SetPlainText(std::string text) {
+        ClearData();
+        text_ = std::move(text);
+    }
+
     Value GetValue() const override {
 
-        if (value_ == std::nullopt) {
-            UpdateValue();
+        if (cache_ == std::nullopt) {
+            CalculateCache();
         }
 
-        return *value_;
+        return *cache_;
+    }
+
+    bool HasCache() const {
+        return cache_ != std::nullopt;
+    }
+
+    void InvalidateCache() {
+        cache_.reset();
     }
 
     std::string GetText() const override {
         return text_;
     }
 
-    void SetText(std::string text) {
-        if (text_ != text) {
-
-            value_.reset();
-            formula_.reset();
-
-            text_ = std::move(text);
-
-            if (!text_.empty() && text_.front() == '=') {
-                formula_ = ParseFormula(text_.substr(1));
-            }
-
-//            UpdateValue();
-        }
-    }
-
     std::vector<Position> GetReferencedCells() const override {
         return formula_ ? formula_->GetReferencedCells() : std::vector<Position>();
+    }
+
+    void AddIncomingCell(Cell* cell) {
+        in_cells_.insert(cell);
+    }
+
+    void RemoveFromIncoming(Cell* cell) {
+        in_cells_.erase(cell);
+    }
+
+    const std::unordered_set<Cell*>& GetInCells() const {
+        return in_cells_;
+    }
+
+    const std::unordered_set<Cell*>& GetOutCells() const {
+        return out_cells_;
     }
 
 };
@@ -129,31 +178,129 @@ private:
         ResizeCols(pos.col);
     }
 
+    static std::unordered_set<const Cell*> TransitiveReferencedCells(const std::unordered_set<Cell*>& formula_ref_cells) {
+
+        std::stack<const Cell*> stack;
+
+        for (Cell* ref_cell: formula_ref_cells) {
+            stack.push(ref_cell);
+        }
+
+        std::unordered_set<const Cell*> result;
+
+        while (!stack.empty()) {
+
+            const Cell* current_cell = stack.top();
+            stack.pop();
+
+            if (result.count(current_cell) == 0) {
+
+                result.insert(current_cell);
+
+                for (const Cell* out_cell: current_cell->GetOutCells()) {
+                    if (result.count(out_cell) == 0) stack.push(out_cell);
+                }
+            }
+        }
+
+        return result;
+    }
+
+    void InvalidateCache(Cell& cell) {
+
+        std::unordered_set<Cell*> visited;
+
+        std::stack<Cell*> stack;
+
+        stack.push(&cell);
+
+        while (!stack.empty()) {
+
+            Cell* current_cell = stack.top();
+            stack.pop();
+
+            if (visited.count(current_cell) > 0) continue;
+
+            visited.insert(current_cell);
+
+            if (current_cell->HasCache()) {
+
+                current_cell->InvalidateCache();
+
+                for (Cell* in_cell: current_cell->GetInCells()) {
+                    if (visited.count(in_cell) == 0) stack.push(in_cell);
+                }
+            }
+        }
+    }
+
 public:
+
+    ~Sheet() override = default;
 
     void SetCell(Position pos, std::string text) override {
 
+        Cell& cell = GetOrCreateCell(pos);
+
+        if (!text.empty() && text.front() == kFormulaSign) {
+
+            std::unique_ptr<IFormula> formula = ParseFormula(text.substr(1));
+
+            //update dependency graph
+            std::unordered_set<Cell*> out_cells;
+
+            for (Position ref_pos: formula->GetReferencedCells()) {
+                out_cells.insert(&GetOrCreateCell(ref_pos));
+            }
+
+            std::unordered_set<const Cell*> transitive_ref_cells = TransitiveReferencedCells(out_cells);
+
+            if (transitive_ref_cells.count(&cell) > 0) {
+                throw CircularDependencyException("circular dependency exception");
+            }
+
+            InvalidateCache(cell);
+
+            cell.SetFormula(std::move(text), std::move(formula), out_cells);
+        } else {
+            InvalidateCache(cell);
+            cell.SetPlainText(std::move(text));
+        }
+    }
+
+    Cell& GetOrCreateCell(Position pos) {
+
         if (!pos.IsValid()) throw InvalidPositionException("invalid position: " + pos.ToString());
 
-        Resize(pos);
+        if (OutOfRange(pos)) {
+            Resize(pos);
+        }
 
         std::unique_ptr<Cell>& cell = cells_[pos.row][pos.col];
 
         if (cell == nullptr) {
-            cell = std::make_unique<Cell>(*this, std::move(text));
-        } else {
-            cell->SetText(std::move(text));
+            cell = std::make_unique<Cell>(*this);
         }
+
+        return *cell;
     }
 
     const ICell* GetCell(Position pos) const override {
-        if (!pos.IsValid() || OutOfRange(pos)) return nullptr;
+
+        if (!pos.IsValid()) throw InvalidPositionException("invalid position: " + pos.ToString());
+
+        if (OutOfRange(pos)) return nullptr;
+
         const auto& cell = cells_[pos.row][pos.col];
         return cell ? cell.get() : nullptr;
     }
 
     ICell* GetCell(Position pos) override {
-        if (!pos.IsValid() || OutOfRange(pos)) return nullptr;
+
+        if (!pos.IsValid()) throw InvalidPositionException("invalid position: " + pos.ToString());
+
+        if (OutOfRange(pos)) return nullptr;
+
         auto& cell = cells_[pos.row][pos.col];
         return cell ? cell.get() : nullptr;
     }
@@ -193,7 +340,6 @@ public:
 
 
 };
-
 
 
 bool Position::operator==(const Position& rhs) const {
@@ -268,7 +414,7 @@ Position Position::FromString(std::string_view str) {
         }
     }
 
-    return Position{-1, -1};
+    return Position {-1, -1};
 }
 
 bool Size::operator==(const Size& rhs) const {
@@ -279,7 +425,7 @@ std::ostream& operator<<(std::ostream& output, FormulaError fe) {
     return output << fe.ToString();
 }
 
-FormulaError::FormulaError(FormulaError::Category category): category_(category) {}
+FormulaError::FormulaError(FormulaError::Category category) : category_(category) {}
 
 FormulaError::Category FormulaError::GetCategory() const {
     return category_;
@@ -291,9 +437,12 @@ bool FormulaError::operator==(FormulaError rhs) const {
 
 std::string_view FormulaError::ToString() const {
     switch (category_) {
-        case Category::Value: return VALUE_ERROR_STR;
-        case Category::Ref: return REF_ERROR_STR;
-        case Category::Div0: return DIV_ERROR_STR;
+        case Category::Value:
+            return VALUE_ERROR_STR;
+        case Category::Ref:
+            return REF_ERROR_STR;
+        case Category::Div0:
+            return DIV_ERROR_STR;
     }
 }
 

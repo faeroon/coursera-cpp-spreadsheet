@@ -142,8 +142,19 @@ IFormula::Value Node::Evaluate(const ISheet& sheet) const {
             if (cell_str_value.empty()) return 0.;
 
             try {
-                return std::stod(cell_str_value);
-            } catch (std::invalid_argument& err) {
+
+                // TODO replace with separate method?
+                size_t idx;
+
+                double value = std::stod(cell_str_value, &idx);
+
+                if (idx < cell_str_value.size()) {
+                    return FormulaError(FormulaError::Category::Value);
+                }
+
+                return value;
+
+            } catch (std::exception& err) {
                 return FormulaError(FormulaError::Category::Value);
             }
         } else if (std::holds_alternative<double>(cell_value)) {
