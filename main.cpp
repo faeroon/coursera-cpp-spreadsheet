@@ -568,6 +568,46 @@ namespace {
     ASSERT(caught);
     ASSERT_EQUAL(sheet->GetCell("M6"_pos)->GetText(), "Ready");
   }
+
+  void TestHandleBeforeDelete() {
+
+      auto sheet = CreateSheet();
+
+      sheet->SetCell("A1"_pos, "=A3");
+      sheet->SetCell("A2"_pos, "=A4");
+      sheet->SetCell("A3"_pos, "1");
+      sheet->SetCell("A4"_pos, "2");
+
+      sheet->DeleteRows(2);
+
+      ASSERT_EQUAL(sheet->GetCell("A1"_pos)->GetValue(), ICell::Value(FormulaError::Category::Ref));
+      ASSERT_EQUAL(sheet->GetCell("A1"_pos)->GetText(), "=" + ToString(FormulaError::Category::Ref));
+
+      ASSERT_EQUAL(sheet->GetCell("A2"_pos)->GetValue(), ICell::Value(2.));
+      ASSERT_EQUAL(sheet->GetCell("A2"_pos)->GetText(), "=A3");
+
+      ASSERT_EQUAL(sheet->GetCell("A3"_pos)->GetValue(), ICell::Value("2"));
+      ASSERT_EQUAL(sheet->GetCell("A3"_pos)->GetText(), "2");
+
+      sheet = CreateSheet();
+
+      sheet->SetCell("A1"_pos, "=C1");
+      sheet->SetCell("B1"_pos, "=D1");
+      sheet->SetCell("C1"_pos, "1");
+      sheet->SetCell("D1"_pos, "2");
+
+      sheet->DeleteCols(2);
+
+      ASSERT_EQUAL(sheet->GetCell("A1"_pos)->GetValue(), ICell::Value(FormulaError::Category::Ref));
+      ASSERT_EQUAL(sheet->GetCell("A1"_pos)->GetText(), "=" + ToString(FormulaError::Category::Ref));
+
+      ASSERT_EQUAL(sheet->GetCell("B1"_pos)->GetValue(), ICell::Value(2.));
+      ASSERT_EQUAL(sheet->GetCell("B1"_pos)->GetText(), "=C1");
+
+      ASSERT_EQUAL(sheet->GetCell("C1"_pos)->GetValue(), ICell::Value("2"));
+      ASSERT_EQUAL(sheet->GetCell("C1"_pos)->GetText(), "2");
+  }
+
 }
 
 int main() {
@@ -598,5 +638,6 @@ int main() {
   RUN_TEST(tr, TestCellReferences);
   RUN_TEST(tr, TestFormulaIncorrect);
   RUN_TEST(tr, TestCellCircularReferences);
+  RUN_TEST(tr, TestHandleBeforeDelete);
   return 0;
 }

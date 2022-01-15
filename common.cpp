@@ -185,19 +185,19 @@ class Sheet : public ISheet {
 private:
     std::vector<std::vector<std::unique_ptr<Cell>>> cells_;
 
-    size_t Rows() const {
-        return cells_.size();
+    int Rows() const {
+        return static_cast<int>(cells_.size());
     }
 
-    size_t Cols() const {
-        return !cells_.empty() ? cells_.front().size() : 0;
+    int Cols() const {
+        return !cells_.empty() ? static_cast<int>(cells_.front().size()) : 0;
     }
 
     bool OutOfRange(Position pos) const {
         return pos.row >= Rows() || pos.col >= Cols();
     }
 
-    void ResizeRows(size_t row_index) {
+    void ResizeRows(int row_index) {
         if (Rows() <= row_index) {
 
             size_t old_rows = Rows();
@@ -210,7 +210,7 @@ private:
         }
     }
 
-    void ResizeCols(size_t col_index) {
+    void ResizeCols(int col_index) {
         if (Cols() <= col_index) {
             for (auto& row: cells_) {
                 row.resize(col_index + 1);
@@ -407,7 +407,11 @@ public:
     }
 
     void InsertRows(int before, int count) override {
+
         if (Rows() + count > Position::kMaxRows) throw TableTooBigException("table too big");
+
+
+
     }
 
     void InsertCols(int before, int count) override {
@@ -423,6 +427,12 @@ public:
         for (int i = first; i < last; ++i) {
             for (int j = 0; j < Cols(); ++j) {
                 DeleteCell(Position {i, j});
+            }
+        }
+
+        for (int i = 0; i < first; ++i) {
+            for (int j = 0; j < Cols(); ++j) {
+                HandleDeletedRowsForCell(Position {i, j}, first, count);
             }
         }
 
@@ -448,6 +458,12 @@ public:
         }
 
         for (int i = 0; i < Rows(); ++i) {
+            for (int j = 0; j < first; ++j) {
+                HandleDeletedColsForCell(Position {i, j}, first, count);
+            }
+        }
+
+        for (int i = 0; i < Rows(); ++i) {
             for (int j = last; j < Cols(); ++j) {
                 HandleDeletedColsForCell(Position {i, j}, first, count);
             }
@@ -469,8 +485,6 @@ public:
     void PrintTexts(std::ostream& output) const override {
 
     }
-
-
 };
 
 
