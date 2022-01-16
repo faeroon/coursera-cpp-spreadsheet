@@ -569,6 +569,24 @@ namespace {
     ASSERT_EQUAL(sheet->GetCell("M6"_pos)->GetText(), "Ready");
   }
 
+  void TestCircularDependencyException() {
+
+      auto sheet = CreateSheet();
+      sheet->SetCell("A1"_pos, "1");
+      sheet->SetCell("A2"_pos, "2");
+
+
+      bool caught = false;
+      try {
+          sheet->SetCell("A1"_pos, "=A1+A2+A3");
+      } catch (const CircularDependencyException&) {
+          caught = true;
+      }
+
+      ASSERT(caught);
+      ASSERT_EQUAL(sheet->GetCell("A1"_pos)->GetText(), "1");
+  }
+
   void TestHandleBeforeDelete() {
 
       auto sheet = CreateSheet();
@@ -688,6 +706,7 @@ int main() {
   RUN_TEST(tr, TestCellReferences);
   RUN_TEST(tr, TestFormulaIncorrect);
   RUN_TEST(tr, TestCellCircularReferences);
+  RUN_TEST(tr, TestCircularDependencyException);
   RUN_TEST(tr, TestHandleBeforeDelete);
   RUN_TEST(tr, TestHandleInsertion);
   RUN_TEST(tr, TestPrintableSize);

@@ -313,32 +313,37 @@ private:
         }
     }
 
-    static std::unordered_set<const Cell*> TransitiveReferencedCells(const std::unordered_set<Cell*>& formula_ref_cells) {
+    void FindCycle(const Cell& updated_cell, const IFormula& formula) {
 
         std::stack<const Cell*> stack;
 
-        for (Cell* ref_cell: formula_ref_cells) {
-            stack.push(ref_cell);
+        for (Position ref_pos: formula.GetReferencedCells()) {
+            if (ref_pos.IsValid() && !OutOfRange(ref_pos)) {
+                const auto& ref_cell_ptr = cells_[ref_pos.row][ref_pos.col];
+                if (ref_cell_ptr != nullptr) {
+                    stack.push(ref_cell_ptr.get());
+                }
+            }
         }
 
-        std::unordered_set<const Cell*> result;
+        std::unordered_set<const Cell*> visited;
 
         while (!stack.empty()) {
 
             const Cell* current_cell = stack.top();
             stack.pop();
 
-            if (result.count(current_cell) == 0) {
+            if (current_cell == &updated_cell) throw CircularDependencyException("circular dependency exception");
 
-                result.insert(current_cell);
+            if (visited.count(current_cell) == 0) {
+
+                visited.insert(current_cell);
 
                 for (const Cell* out_cell: current_cell->GetOutCells()) {
-                    if (result.count(out_cell) == 0) stack.push(out_cell);
+                    if (visited.count(out_cell) == 0) stack.push(out_cell);
                 }
             }
         }
-
-        return result;
     }
 
     static void InvalidateCache(Cell& cell) {
@@ -433,17 +438,13 @@ public:
 
             std::unique_ptr<IFormula> formula = ParseFormula(text.substr(1));
 
+            FindCycle(cell, *formula);
+
             //update dependency graph
             std::unordered_set<Cell*> out_cells;
 
             for (Position ref_pos: formula->GetReferencedCells()) {
                 out_cells.insert(&GetOrCreateCell(ref_pos));
-            }
-
-            std::unordered_set<const Cell*> transitive_ref_cells = TransitiveReferencedCells(out_cells);
-
-            if (transitive_ref_cells.count(&cell) > 0) {
-                throw CircularDependencyException("circular dependency exception");
             }
 
             InvalidateCache(cell);
