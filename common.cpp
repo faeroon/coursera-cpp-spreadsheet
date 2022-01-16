@@ -169,6 +169,28 @@ public:
         }
     }
 
+    void HandleInsertedRows(int before, int count) {
+
+        if (formula_ == nullptr) return;
+
+        IFormula::HandlingResult result = formula_->HandleInsertedRows(before, count);
+
+        if (result == IFormula::HandlingResult::ReferencesRenamedOnly) {
+            text_ = '=' + formula_->GetExpression();
+        }
+    }
+
+    void HandleInsertedCols(int before, int count) {
+
+        if (formula_ == nullptr) return;
+
+        IFormula::HandlingResult result = formula_->HandleInsertedCols(before, count);
+
+        if (result == IFormula::HandlingResult::ReferencesRenamedOnly) {
+            text_ = '=' + formula_->GetExpression();
+        }
+    }
+
     const std::unordered_set<Cell*>& GetInCells() const {
         return in_cells_;
     }
@@ -272,6 +294,31 @@ private:
         bool need_invalidate_cache = cell_ptr->HandleDeletedCols(first, count);
 
         if (need_invalidate_cache) InvalidateCache(*cell_ptr);
+    }
+
+    void HandleInsertedRows(Position pos, int before, int count) {
+
+        if (!pos.IsValid()) throw InvalidPositionException("invalid position: " + pos.ToString());
+
+        if (OutOfRange(pos)) return;
+
+        std::unique_ptr<Cell>& cell_ptr = cells_[pos.row][pos.col];
+
+        if (cell_ptr != nullptr) {
+            cell_ptr->HandleInsertedRows(before, count);
+        }
+    }
+
+    void HandleInsertedCols(Position pos, int before, int count) {
+        if (!pos.IsValid()) throw InvalidPositionException("invalid position: " + pos.ToString());
+
+        if (OutOfRange(pos)) return;
+
+        std::unique_ptr<Cell>& cell_ptr = cells_[pos.row][pos.col];
+
+        if (cell_ptr != nullptr) {
+            cell_ptr->HandleInsertedCols(before, count);
+        }
     }
 
     static std::unordered_set<const Cell*> TransitiveReferencedCells(const std::unordered_set<Cell*>& formula_ref_cells) {
@@ -410,12 +457,48 @@ public:
 
         if (Rows() + count > Position::kMaxRows) throw TableTooBigException("table too big");
 
+        if (Rows() <= before) return;
 
+        for (int i = 0; i < Rows(); ++i) {
+            for (int j = 0; j < Cols(); ++j) {
+                HandleInsertedRows(Position {i, j}, before, count);
+            }
+        }
 
+        std::vector<std::vector<std::unique_ptr<Cell>>> cells_to_insert;
+        cells_to_insert.reserve(count);
+
+        for (int i = 0; i < count; i++) {
+            cells_to_insert.emplace_back(std::vector<std::unique_ptr<Cell>>(Cols()));
+        }
+
+        cells_.insert(
+            cells_.begin() + before,
+            std::make_move_iterator(cells_to_insert.begin()),
+            std::make_move_iterator(cells_to_insert.end())
+        );
     }
 
     void InsertCols(int before, int count) override {
+
         if (Cols() + count > Position::kMaxCols) throw TableTooBigException("table too big");
+
+        if (Cols() <= before) return;
+
+        for (int i = 0; i < Rows(); ++i) {
+            for (int j = 0; j < Cols(); ++j) {
+                HandleInsertedCols(Position {i, j}, before, count);
+            }
+        }
+
+        for (int i = 0; i < Rows(); ++i) {
+            std::vector<std::unique_ptr<Cell>> cells_to_add(count);
+            cells_[i].insert(
+                cells_[i].begin() + before,
+                std::make_move_iterator(cells_to_add.begin()),
+                std::make_move_iterator(cells_to_add.end())
+            );
+        }
     }
 
     void DeleteRows(int first, int count) override {

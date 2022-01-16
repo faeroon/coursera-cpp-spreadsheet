@@ -608,6 +608,43 @@ namespace {
       ASSERT_EQUAL(sheet->GetCell("C1"_pos)->GetText(), "2");
   }
 
+  void TestHandleInsertion() {
+
+      auto sheet = CreateSheet();
+
+      sheet->SetCell("A1"_pos, "=A2");
+      sheet->SetCell("A2"_pos, "1");
+      sheet->SetCell("A3"_pos, "=A1+A2");
+
+      sheet->InsertRows(1, 2);
+
+      ASSERT_EQUAL(sheet->GetCell("A1"_pos)->GetValue(), ICell::Value(1.));
+      ASSERT_EQUAL(sheet->GetCell("A1"_pos)->GetText(), "=A4");
+
+      ASSERT_EQUAL(sheet->GetCell("A4"_pos)->GetValue(), ICell::Value("1"));
+      ASSERT_EQUAL(sheet->GetCell("A4"_pos)->GetText(), "1");
+
+      ASSERT_EQUAL(sheet->GetCell("A5"_pos)->GetValue(), ICell::Value(2.));
+      ASSERT_EQUAL(sheet->GetCell("A5"_pos)->GetText(), "=A1+A4");
+
+      sheet = CreateSheet();
+
+      sheet->SetCell("A1"_pos, "=B1");
+      sheet->SetCell("B1"_pos, "1");
+      sheet->SetCell("C1"_pos, "=A1+B1");
+
+      sheet->InsertCols(1, 2);
+
+      ASSERT_EQUAL(sheet->GetCell("A1"_pos)->GetValue(), ICell::Value(1.));
+      ASSERT_EQUAL(sheet->GetCell("A1"_pos)->GetText(), "=D1");
+
+      ASSERT_EQUAL(sheet->GetCell("D1"_pos)->GetValue(), ICell::Value("1"));
+      ASSERT_EQUAL(sheet->GetCell("D1"_pos)->GetText(), "1");
+
+      ASSERT_EQUAL(sheet->GetCell("E1"_pos)->GetValue(), ICell::Value(2.));
+      ASSERT_EQUAL(sheet->GetCell("E1"_pos)->GetText(), "=A1+D1");
+  }
+
 }
 
 int main() {
@@ -639,5 +676,6 @@ int main() {
   RUN_TEST(tr, TestFormulaIncorrect);
   RUN_TEST(tr, TestCellCircularReferences);
   RUN_TEST(tr, TestHandleBeforeDelete);
+  RUN_TEST(tr, TestHandleInsertion);
   return 0;
 }
