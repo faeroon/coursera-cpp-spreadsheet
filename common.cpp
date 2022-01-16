@@ -8,6 +8,7 @@
 #include <memory>
 #include <regex>
 #include <optional>
+#include <iostream>
 
 static const uint8_t ALPHABET_POWER = 26;
 static const uint8_t ALPHABET_OFFSET = 0x41;
@@ -377,6 +378,56 @@ private:
         }
     }
 
+    int MaxNonEmptyCellRowSize() const {
+
+        for (int i = Rows() - 1; i >= 0; --i) {
+            for (int j = 0; j < Cols(); ++j) {
+
+                const auto& cell_ptr = cells_[i][j];
+
+                if (cell_ptr != nullptr && !cell_ptr->GetText().empty()) {
+                    return i + 1;
+                }
+            }
+        }
+
+        return 0;
+    }
+
+    int MaxNonEmptyCellColSize() const {
+
+        for (int j = Cols() - 1; j >= 0; --j) {
+            for (int i = 0; i < Rows(); ++i) {
+
+                const auto& cell_ptr = cells_[i][j];
+
+                if (cell_ptr != nullptr && !cell_ptr->GetText().empty()) {
+                    return j + 1;
+                }
+            }
+        }
+
+        return 0;
+    }
+
+    void PrintCellValue(std::ostream& output, Position pos) const {
+
+        const auto& cell_ptr = cells_[pos.row][pos.col];
+
+        if (cell_ptr != nullptr) {
+
+            const ICell::Value value = cell_ptr->GetValue();
+
+            if (std::holds_alternative<double>(value)) {
+                output << std::get<double>(value);
+            } else if (std::holds_alternative<std::string>(value)) {
+                output << std::get<std::string>(value);
+            } else if (std::holds_alternative<FormulaError>(value)) {
+                output << std::get<FormulaError>(value).ToString();
+            }
+        }
+    }
+
 public:
 
     ~Sheet() override = default;
@@ -558,15 +609,41 @@ public:
     }
 
     Size GetPrintableSize() const override {
-        return Size {static_cast<int>(Rows()), static_cast<int>(Cols())};
+        return Size {MaxNonEmptyCellRowSize(), MaxNonEmptyCellColSize()};
     }
 
     void PrintValues(std::ostream& output) const override {
 
+        Size size = GetPrintableSize();
+
+        for (int i = 0; i < size.rows; ++i) {
+            for (int j = 0; j < size.cols; ++j) {
+                if (j > 0) output << '\t';
+                PrintCellValue(output, Position {i, j});
+            }
+
+            output << '\n';
+        }
     }
 
     void PrintTexts(std::ostream& output) const override {
 
+        Size size = GetPrintableSize();
+
+        for (int i = 0; i < size.rows; ++i) {
+            for (int j = 0; j < size.cols; ++j) {
+
+                if (j > 0) output << '\t';
+
+                const auto& cell_ptr = cells_[i][j];
+
+                if (cell_ptr != nullptr) {
+                    output << cell_ptr->GetText();
+                }
+            }
+
+            output << '\n';
+        }
     }
 };
 

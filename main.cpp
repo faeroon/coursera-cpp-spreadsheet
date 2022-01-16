@@ -645,6 +645,19 @@ namespace {
       ASSERT_EQUAL(sheet->GetCell("E1"_pos)->GetText(), "=A1+D1");
   }
 
+  void TestPrintableSize() {
+
+      auto sheet = CreateSheet();
+
+      sheet->SetCell("D4"_pos, "");
+      sheet->SetCell("A3"_pos, "1");
+      sheet->SetCell("B2"_pos, "2");
+
+      Size expected {3, 2};
+
+      ASSERT_EQUAL(sheet->GetPrintableSize(), expected);
+  }
+
 }
 
 int main() {
@@ -677,5 +690,6 @@ int main() {
   RUN_TEST(tr, TestCellCircularReferences);
   RUN_TEST(tr, TestHandleBeforeDelete);
   RUN_TEST(tr, TestHandleInsertion);
+  RUN_TEST(tr, TestPrintableSize);
   return 0;
 }
