@@ -212,38 +212,29 @@ private:
         return static_cast<int>(cells_.size());
     }
 
-    int Cols() const {
-        return !cells_.empty() ? static_cast<int>(cells_.front().size()) : 0;
+    int Cols(int row) const {
+        return !cells_.empty() ? static_cast<int>(cells_[row].size()) : 0;
     }
 
     bool OutOfRange(Position pos) const {
-        return pos.row >= Rows() || pos.col >= Cols();
+        return pos.row >= Rows() || pos.col >= Cols(pos.row);
     }
 
     void ResizeRows(int row_index) {
         if (Rows() <= row_index) {
-
-            size_t old_rows = Rows();
-
             cells_.resize(row_index + 1);
-
-            for (size_t i = old_rows; i < cells_.size(); ++i) {
-                cells_[i].resize(Cols());
-            }
         }
     }
 
-    void ResizeCols(int col_index) {
-        if (Cols() <= col_index) {
-            for (auto& row: cells_) {
-                row.resize(col_index + 1);
-            }
+    void ResizeCols(int row_index, int col_index) {
+        if (Cols(row_index) <= col_index) {
+            cells_[row_index].resize(col_index + 1);
         }
     }
 
     void Resize(Position pos) {
         ResizeRows(pos.row);
-        ResizeCols(pos.col);
+        ResizeCols(pos.row, pos.col);
     }
 
     void DeleteCell(Position pos) {
@@ -381,7 +372,7 @@ private:
     int MaxNonEmptyCellRowSize() const {
 
         for (int i = Rows() - 1; i >= 0; --i) {
-            for (int j = 0; j < Cols(); ++j) {
+            for (int j = 0; j < Cols(i); ++j) {
 
                 const auto& cell_ptr = cells_[i][j];
 
@@ -396,18 +387,20 @@ private:
 
     int MaxNonEmptyCellColSize() const {
 
-        for (int j = Cols() - 1; j >= 0; --j) {
-            for (int i = 0; i < Rows(); ++i) {
+        int col_max_index = 0;
+
+        for (int i = 0; i < Rows(); ++i) {
+            for (int j = Cols(i) - 1; j >= 0; j--) {
 
                 const auto& cell_ptr = cells_[i][j];
 
                 if (cell_ptr != nullptr && !cell_ptr->GetText().empty()) {
-                    return j + 1;
+                    col_max_index = std::max(col_max_index, j + 1);
                 }
             }
         }
 
-        return 0;
+        return col_max_index;
     }
 
     void PrintCellValue(std::ostream& output, Position pos) const {
@@ -511,7 +504,8 @@ public:
         if (Rows() <= before) return;
 
         for (int i = 0; i < Rows(); ++i) {
-            for (int j = 0; j < Cols(); ++j) {
+            int cols = Cols(i);
+            for (int j = 0; j < cols; ++j) {
                 HandleInsertedRows(Position {i, j}, before, count);
             }
         }
@@ -520,7 +514,7 @@ public:
         cells_to_insert.reserve(count);
 
         for (int i = 0; i < count; i++) {
-            cells_to_insert.emplace_back(std::vector<std::unique_ptr<Cell>>(Cols()));
+            cells_to_insert.emplace_back(std::vector<std::unique_ptr<Cell>>());
         }
 
         cells_.insert(
@@ -532,23 +526,30 @@ public:
 
     void InsertCols(int before, int count) override {
 
-        if (Cols() + count > Position::kMaxCols) throw TableTooBigException("table too big");
+        int max_cols = 0;
 
-        if (Cols() <= before) return;
-
-        for (int i = 0; i < Rows(); ++i) {
-            for (int j = 0; j < Cols(); ++j) {
-                HandleInsertedCols(Position {i, j}, before, count);
-            }
+        for (const auto& row: cells_) {
+            max_cols = std::max(max_cols, static_cast<int>(row.size()));
         }
 
+        if (max_cols + count > Position::kMaxCols) throw TableTooBigException("table too big");
+
         for (int i = 0; i < Rows(); ++i) {
-            std::vector<std::unique_ptr<Cell>> cells_to_add(count);
-            cells_[i].insert(
-                cells_[i].begin() + before,
-                std::make_move_iterator(cells_to_add.begin()),
-                std::make_move_iterator(cells_to_add.end())
-            );
+
+            int cols = Cols(i);
+
+            for (int j = 0; j < cols; ++j) {
+                HandleInsertedCols(Position {i, j}, before, count);
+            }
+
+            if (before < cols) {
+                std::vector<std::unique_ptr<Cell>> cells_to_add(count);
+                cells_[i].insert(
+                    cells_[i].begin() + before,
+                    std::make_move_iterator(cells_to_add.begin()),
+                    std::make_move_iterator(cells_to_add.end())
+                );
+            }
         }
     }
 
@@ -558,53 +559,61 @@ public:
 
         int last = std::min(static_cast<int>(Rows()), first + count);
 
+        // clear cells
         for (int i = first; i < last; ++i) {
-            for (int j = 0; j < Cols(); ++j) {
+            int cols = Cols(i);
+            for (int j = 0; j < cols; ++j) {
                 DeleteCell(Position {i, j});
             }
         }
 
+        // update cells before cleared
         for (int i = 0; i < first; ++i) {
-            for (int j = 0; j < Cols(); ++j) {
+            int cols = Cols(i);
+            for (int j = 0; j < cols; ++j) {
                 HandleDeletedRowsForCell(Position {i, j}, first, count);
             }
         }
 
+        // update cells after cleared
         for (int i = last; i < Rows(); ++i) {
-            for (int j = 0; j < Cols(); ++j) {
+            int cols = Cols(i);
+            for (int j = 0; j < cols; ++j) {
                 HandleDeletedRowsForCell(Position {i, j}, first, count);
             }
         }
 
+        // erasure rows
         cells_.erase(cells_.begin() + first, cells_.begin() + last);
     }
 
     void DeleteCols(int first, int count) override {
 
-        if (Cols() <= first || count <= 0) return;
-
-        int last = std::min(static_cast<int>(Cols()), first + count);
-
         for (int i = 0; i < Rows(); ++i) {
+
+            int cols = Cols(i);
+
+            int last = std::min(cols, first + count);
+
+            // clear cells
             for (int j = first; j < last; ++j) {
                 DeleteCell(Position {i, j});
             }
-        }
 
-        for (int i = 0; i < Rows(); ++i) {
-            for (int j = 0; j < first; ++j) {
+            // update cells before cleared
+            for (int j = 0; j < cols && j < first; ++j) {
                 HandleDeletedColsForCell(Position {i, j}, first, count);
             }
-        }
 
-        for (int i = 0; i < Rows(); ++i) {
-            for (int j = last; j < Cols(); ++j) {
+            // update cells after cleared
+            for (int j = last; j < cols; ++j) {
                 HandleDeletedColsForCell(Position {i, j}, first, count);
             }
-        }
 
-        for (int i = 0; i < Rows(); ++i) {
-            cells_[i].erase(cells_[i].begin() + first, cells_[i].begin() + last);
+            // erase cells from vector
+            if (first < cols) {
+                cells_[i].erase(cells_[i].begin() + first, cells_[i].begin() + last);
+            }
         }
     }
 
@@ -617,8 +626,10 @@ public:
         Size size = GetPrintableSize();
 
         for (int i = 0; i < size.rows; ++i) {
+            int cols = Cols(i);
             for (int j = 0; j < size.cols; ++j) {
                 if (j > 0) output << '\t';
+                if (j >= cols) continue;
                 PrintCellValue(output, Position {i, j});
             }
 
@@ -631,9 +642,14 @@ public:
         Size size = GetPrintableSize();
 
         for (int i = 0; i < size.rows; ++i) {
+
+            int cols = Cols(i);
+
             for (int j = 0; j < size.cols; ++j) {
 
                 if (j > 0) output << '\t';
+
+                if (j >= cols) continue;
 
                 const auto& cell_ptr = cells_[i][j];
 
