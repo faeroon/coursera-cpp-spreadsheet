@@ -719,16 +719,20 @@ namespace {
 
       auto sheet = CreateSheet();
 
-      sheet->SetCell("A1"_pos, "1");
+      {
+          LOG_DURATION("build pascal triangle");
 
-      for (int i = 1; i < n; ++i) {
+          sheet->SetCell("A1"_pos, "1");
 
-          sheet->SetCell(Position {i, 0}, "=" + Position {i - 1, 0}.ToString());
+          for (int i = 1; i < n; ++i) {
 
-          for (int j = 1; j <= i; ++j) {
-              sheet->SetCell(
-                  Position {i, j},
-                  "=" + Position {i - 1, j - 1}.ToString() + "+" + Position {i - 1, j}.ToString());
+              sheet->SetCell(Position {i, 0}, "=" + Position {i - 1, 0}.ToString());
+
+              for (int j = 1; j <= i; ++j) {
+                  sheet->SetCell(
+                      Position {i, j},
+                      "=" + Position {i - 1, j - 1}.ToString() + "+" + Position {i - 1, j}.ToString());
+              }
           }
       }
 

@@ -313,13 +313,21 @@ private:
         }
     }
 
-    void FindCycle(const Cell& updated_cell, const IFormula& formula) {
+    void FindCycle(Position updated_pos, const Cell& updated_cell, const IFormula& formula) {
+
+        std::vector<Position> ref_positions = formula.GetReferencedCells();
+
+        if (std::binary_search(ref_positions.begin(), ref_positions.end(), updated_pos)) {
+            throw CircularDependencyException("circular dependency exception");
+        }
+
+        if (updated_cell.GetInCells().empty()) return;
 
         std::stack<const Cell*> stack;
 
         std::unordered_set<Cell*> updated_out_cells = updated_cell.GetOutCells();
 
-        for (Position ref_pos: formula.GetReferencedCells()) {
+        for (Position ref_pos: ref_positions) {
             if (ref_pos.IsValid() && !OutOfRange(ref_pos)) {
                 const auto& ref_cell_ptr = cells_[ref_pos.row][ref_pos.col];
                 if (ref_cell_ptr != nullptr && updated_out_cells.count(ref_cell_ptr.get()) == 0) {
@@ -438,14 +446,14 @@ public:
 
         if (!text.empty() && text.front() == kFormulaSign) {
 
-//            if (text == cell.GetText()) {
-//                InvalidateCache(cell);
-//                return;
-//            }
+            if (text == cell.GetText()) {
+                InvalidateCache(cell);
+                return;
+            }
 
             std::unique_ptr<IFormula> formula = ParseFormula(text.substr(1));
 
-            FindCycle(cell, *formula);
+            FindCycle(pos, cell, *formula);
 
             //update dependency graph
             std::unordered_set<Cell*> out_cells;
