@@ -1,6 +1,7 @@
 #include "common.h"
 #include "formula.h"
 #include "test_runner.h"
+#include "profile.h"
 
 std::ostream& operator<<(std::ostream& output, Position pos) {
   return output << "(" << pos.row << ", " << pos.col << ")";
@@ -676,6 +677,64 @@ namespace {
       ASSERT_EQUAL(sheet->GetPrintableSize(), expected);
   }
 
+  void TestSetCellSameValue() {
+
+      auto sheet = CreateSheet();
+
+      Position pos {0, 0};
+      std::string value = "1";
+
+      sheet->SetCell(pos, value);
+
+      int iterations = 10'000;
+
+      {
+          LOG_DURATION("SetCell same value");
+
+          for (int i = 0; i < iterations; ++i) {
+              sheet->SetCell(pos, value);
+          }
+      }
+  }
+
+  void TestIterations(ISheet& sheet) {
+
+      int iterations = 10'000;
+
+      Position last_position {99, 99};
+      std::string last_text =  "=" + Position {98, 98}.ToString() + "+" + Position {98, 99}.ToString();
+
+      {
+          LOG_DURATION("SetCell with same formula");
+
+          for (int i = 0; i < iterations; ++i) {
+              sheet.SetCell(last_position, last_text);
+          }
+      }
+  }
+
+  void TestPascalTriangle() {
+
+      int n = 100;
+
+      auto sheet = CreateSheet();
+
+      sheet->SetCell("A1"_pos, "1");
+
+      for (int i = 1; i < n; ++i) {
+
+          sheet->SetCell(Position {i, 0}, "=" + Position {i - 1, 0}.ToString());
+
+          for (int j = 1; j <= i; ++j) {
+              sheet->SetCell(
+                  Position {i, j},
+                  "=" + Position {i - 1, j - 1}.ToString() + "+" + Position {i - 1, j}.ToString());
+          }
+      }
+
+      TestIterations(*sheet);
+  }
+
 }
 
 int main() {
@@ -710,5 +769,7 @@ int main() {
   RUN_TEST(tr, TestHandleBeforeDelete);
   RUN_TEST(tr, TestHandleInsertion);
   RUN_TEST(tr, TestPrintableSize);
+  RUN_TEST(tr, TestSetCellSameValue);
+  RUN_TEST(tr, TestPascalTriangle);
   return 0;
 }

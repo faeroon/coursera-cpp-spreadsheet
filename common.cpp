@@ -317,10 +317,12 @@ private:
 
         std::stack<const Cell*> stack;
 
+        std::unordered_set<Cell*> updated_out_cells = updated_cell.GetOutCells();
+
         for (Position ref_pos: formula.GetReferencedCells()) {
             if (ref_pos.IsValid() && !OutOfRange(ref_pos)) {
                 const auto& ref_cell_ptr = cells_[ref_pos.row][ref_pos.col];
-                if (ref_cell_ptr != nullptr) {
+                if (ref_cell_ptr != nullptr && updated_out_cells.count(ref_cell_ptr.get()) == 0) {
                     stack.push(ref_cell_ptr.get());
                 }
             }
@@ -435,6 +437,11 @@ public:
         Cell& cell = GetOrCreateCell(pos);
 
         if (!text.empty() && text.front() == kFormulaSign) {
+
+//            if (text == cell.GetText()) {
+//                InvalidateCache(cell);
+//                return;
+//            }
 
             std::unique_ptr<IFormula> formula = ParseFormula(text.substr(1));
 
